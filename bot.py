@@ -1,5 +1,9 @@
 import html
 import logging
+import os
+from threading import Thread
+
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
@@ -8,6 +12,20 @@ from telegram.ext import (
 
 from config import BOT_TOKEN, OWNER_IDS, RANKS, DEVELOPERS_TEXT
 from database import Database, init_db
+
+# ── Веб-сервер для UptimeRobot ────────────────────────────────────────────────
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def index():
+    return "Bot is running!", 200
+
+def _run_web():
+    port = int(os.environ.get("PORT", 8080))
+    flask_app.run(host="0.0.0.0", port=port)
+
+Thread(target=_run_web, daemon=True).start()
+# ─────────────────────────────────────────────────────────────────────────────
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s — %(message)s",
