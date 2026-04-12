@@ -1,16 +1,55 @@
+import os
 import sqlite3
 from datetime import datetime
 
-DB_PATH = "bot.db"
+# Если задана DATABASE_URL — используем PostgreSQL, иначе SQLite
+DATABASE_URL = os.environ.get("DATABASE_URL")
+
+if DATABASE_URL:
+    import psycopg2
+    import psycopg2.extras
+
+    def get_conn():
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+
+    PLACEHOLDER = "%s"
+    AUTOINCREMENT = "SERIAL PRIMARY KEY"
+    IGNORE = "ON CONFLICT DO NOTHING"
+
+else:
+    def get_conn():
+        conn = sqlite3.connect("bot.db")
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    PLACEHOLDER = "?"
+    AUTOINCREMENT = "INTEGER PRIMARY KEY AUTOINCREMENT"
+    IGNORE = "OR IGNORE"
 
 
-def get_conn():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+def _row_to_dict(row, cursor=None):
+    """Универсальный перевод строки в dict для SQLite и PostgreSQL."""
+    if row is None:
+        return None
+    if isinstance(row, dict):
+        return row
+    if hasattr(row, "keys"):          # sqlite3.Row
+        return dict(row)
+    if cursor is not None:             # psycopg2 tuple
+        cols = [d[0] for d in cursor.description]
+        return dict(zip(cols, row))
+    return row
 
 
 def init_db():
+    if DATABASE_URL:
+        _init_pg()
+    else:
+        _init_sqlite()
+
+
+def _init_sqlite():
     with get_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
@@ -21,7 +60,6 @@ def init_db():
                 blocked   INTEGER DEFAULT 0,
                 joined_at TEXT
             );
-
             CREATE TABLE IF NOT EXISTS suggestions (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id     INTEGER,
@@ -30,7 +68,6 @@ def init_db():
                 created_at  TEXT,
                 admin_reply TEXT
             );
-
             CREATE TABLE IF NOT EXISTS admin_messages (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id     INTEGER,
@@ -40,164 +77,236 @@ def init_db():
                 admin_reply TEXT
             );
         """)
-
         try:
             conn.execute("ALTER TABLE users ADD COLUMN blocked INTEGER DEFAULT 0")
         except Exception:
             pass
 
 
+def _init_pg():
+    with get_conn() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                user_id   BIGINT PRIMARY KEY,
+                username  TEXT    DEFAULT '',
+                full_name TEXT    DEFAULT '',
+                rank      TEXT    DEFAULT 'user',
+                blocked   INTEGER DEFAULT 0,
+                joined_at TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS suggestions (
+                id          SERIAL PRIMARY KEY,
+                user_id     BIGINT,
+                text        TEXT,
+                status      TEXT DEFAULT 'pending',
+                created_at  TEXT,
+                admin_reply TEXT
+            )
+        """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS admin_messages (
+                id          SERIAL PRIMARY KEY,
+                user_id     BIGINT,
+                text        TEXT,
+                status      TEXT DEFAULT 'unread',
+                created_at  TEXT,
+                admin_reply TEXT
+            )
+        """)
+        conn.commit()
 
+
+# ─── Универсальный исполнитель запросов ───────────────────────────────────────
+
+def _exec(sql: str, params=(), fetchone=False, fetchall=False, lastrowid=False):
+    """Выполняет SQL совместимо с SQLite и PostgreSQL."""
+    if DATABASE_URL:
+        sql = sql.replace("?", "%s")
+        sql = sql.replace("INSERT OR IGNORE", "INSERT")
+        sql = sql.replace("OR IGNORE", "")
+        # Для INSERT с lastrowid добавляем RETURNING id
+        if lastrowid and sql.strip().upper().startswith("INSERT"):
+            if "RETURNING" not in sql.upper():
+                sql = sql.rstrip("; ") + " RETURNING id"
+        conn = get_conn()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            result = None
+            if lastrowid:
+                row = cur.fetchone()
+                result = row[0] if row else None
+            elif fetchone:
+                row = cur.fetchone()
+                result = _row_to_dict(row, cur) if row else None
+            elif fetchall:
+                rows = cur.fetchall()
+                result = [_row_to_dict(r, cur) for r in rows]
+            conn.commit()
+            return result
+        finally:
+            conn.close()
+    else:
+        conn = get_conn()
+        try:
+            cur = conn.execute(sql, params)
+            result = None
+            if lastrowid:
+                result = cur.lastrowid
+            elif fetchone:
+                row = cur.fetchone()
+                result = _row_to_dict(row) if row else None
+            elif fetchall:
+                result = [_row_to_dict(r) for r in cur.fetchall()]
+            conn.commit()
+            return result
+        finally:
+            conn.close()
+
+
+# ─── Database class ───────────────────────────────────────────────────────────
 
 class Database:
 
     def add_user(self, user_id: int, username: str, full_name: str):
-        with get_conn() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO users (user_id, username, full_name, joined_at) VALUES (?,?,?,?)",
-                (user_id, username, full_name, datetime.now().strftime("%Y-%m-%d %H:%M"))
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        if DATABASE_URL:
+            _exec(
+                "INSERT INTO users (user_id, username, full_name, joined_at) "
+                "VALUES (?, ?, ?, ?) ON CONFLICT (user_id) DO NOTHING",
+                (user_id, username, full_name, now)
             )
-            conn.execute(
-                "UPDATE users SET username=?, full_name=? WHERE user_id=?",
-                (username, full_name, user_id)
+        else:
+            _exec(
+                "INSERT OR IGNORE INTO users (user_id, username, full_name, joined_at) "
+                "VALUES (?, ?, ?, ?)",
+                (user_id, username, full_name, now)
             )
+        _exec(
+            "UPDATE users SET username=?, full_name=? WHERE user_id=?",
+            (username, full_name, user_id)
+        )
 
     def get_user(self, user_id: int):
-        with get_conn() as conn:
-            row = conn.execute("SELECT * FROM users WHERE user_id=?", (user_id,)).fetchone()
-        return dict(row) if row else None
+        return _exec("SELECT * FROM users WHERE user_id=?", (user_id,), fetchone=True)
 
     def get_user_rank(self, user_id: int) -> str:
-        with get_conn() as conn:
-            row = conn.execute("SELECT rank FROM users WHERE user_id=?", (user_id,)).fetchone()
+        row = _exec("SELECT rank FROM users WHERE user_id=?", (user_id,), fetchone=True)
         return row["rank"] if row else "user"
 
     def set_user_rank(self, user_id: int, rank: str):
-        with get_conn() as conn:
-            conn.execute("UPDATE users SET rank=? WHERE user_id=?", (rank, user_id))
+        _exec("UPDATE users SET rank=? WHERE user_id=?", (rank, user_id))
 
     def get_all_users(self):
-        with get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM users ORDER BY CASE rank "
-                "WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 "
-                "WHEN 'moderator' THEN 3 ELSE 4 END"
-            ).fetchall()
-        return [dict(r) for r in rows]
+        return _exec(
+            "SELECT * FROM users ORDER BY "
+            "CASE rank WHEN 'owner' THEN 1 WHEN 'admin' THEN 2 "
+            "WHEN 'moderator' THEN 3 ELSE 4 END",
+            fetchall=True
+        ) or []
 
     def get_users_by_rank(self, ranks: list):
-        placeholders = ",".join("?" * len(ranks))
-        with get_conn() as conn:
-            rows = conn.execute(
-                f"SELECT * FROM users WHERE rank IN ({placeholders})", ranks
-            ).fetchall()
-        return [dict(r) for r in rows]
-
- 
-
-    def add_suggestion(self, user_id: int, text: str) -> int:
-        with get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO suggestions (user_id, text, created_at) VALUES (?,?,?)",
-                (user_id, text, datetime.now().strftime("%Y-%m-%d %H:%M"))
-            )
-        return cur.lastrowid
-
-    def get_suggestions(self, status: str = None):
-        with get_conn() as conn:
-            if status:
-                rows = conn.execute(
-                    "SELECT * FROM suggestions WHERE status=? ORDER BY id DESC", (status,)
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT * FROM suggestions ORDER BY id DESC"
-                ).fetchall()
-        return [dict(r) for r in rows]
-
-    def get_suggestion(self, sugg_id: int):
-        with get_conn() as conn:
-            row = conn.execute("SELECT * FROM suggestions WHERE id=?", (sugg_id,)).fetchone()
-        return dict(row) if row else None
-
-    def update_suggestion(self, sugg_id: int, status: str = None, reply: str = None):
-        with get_conn() as conn:
-            if status is not None and reply is not None:
-                conn.execute(
-                    "UPDATE suggestions SET status=?, admin_reply=? WHERE id=?",
-                    (status, reply, sugg_id)
-                )
-            elif status is not None:
-                conn.execute("UPDATE suggestions SET status=? WHERE id=?", (status, sugg_id))
-            elif reply is not None:
-                conn.execute("UPDATE suggestions SET admin_reply=? WHERE id=?", (reply, sugg_id))
-
-
-    def add_admin_message(self, user_id: int, text: str) -> int:
-        with get_conn() as conn:
-            cur = conn.execute(
-                "INSERT INTO admin_messages (user_id, text, created_at) VALUES (?,?,?)",
-                (user_id, text, datetime.now().strftime("%Y-%m-%d %H:%M"))
-            )
-        return cur.lastrowid
-
-    def get_admin_messages(self):
-        with get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM admin_messages ORDER BY id DESC"
-            ).fetchall()
-        return [dict(r) for r in rows]
-
-    def get_admin_message(self, msg_id: int):
-        with get_conn() as conn:
-            row = conn.execute(
-                "SELECT * FROM admin_messages WHERE id=?", (msg_id,)
-            ).fetchone()
-        return dict(row) if row else None
-
-    def mark_message_read(self, msg_id: int):
-        with get_conn() as conn:
-            conn.execute(
-                "UPDATE admin_messages SET status='read' WHERE id=?", (msg_id,)
-            )
-
-    def update_message_reply(self, msg_id: int, reply: str):
-        with get_conn() as conn:
-            conn.execute(
-                "UPDATE admin_messages SET admin_reply=?, status='replied' WHERE id=?",
-                (reply, msg_id)
-            )
-
-   
-
-    def block_user(self, user_id: int):
-        with get_conn() as conn:
-            conn.execute("UPDATE users SET blocked=1 WHERE user_id=?", (user_id,))
-
-    def unblock_user(self, user_id: int):
-        with get_conn() as conn:
-            conn.execute("UPDATE users SET blocked=0 WHERE user_id=?", (user_id,))
+        placeholders = ",".join(["?"] * len(ranks))
+        return _exec(
+            f"SELECT * FROM users WHERE rank IN ({placeholders})",
+            ranks, fetchall=True
+        ) or []
 
     def is_blocked(self, user_id: int) -> bool:
-        with get_conn() as conn:
-            row = conn.execute("SELECT blocked FROM users WHERE user_id=?", (user_id,)).fetchone()
+        row = _exec("SELECT blocked FROM users WHERE user_id=?", (user_id,), fetchone=True)
         return bool(row["blocked"]) if row else False
 
+    def block_user(self, user_id: int):
+        _exec("UPDATE users SET blocked=1 WHERE user_id=?", (user_id,))
+
+    def unblock_user(self, user_id: int):
+        _exec("UPDATE users SET blocked=0 WHERE user_id=?", (user_id,))
+
+    # ─── Suggestions ──────────────────────────────────────────────────────────
+
+    def add_suggestion(self, user_id: int, text: str) -> int:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        return _exec(
+            "INSERT INTO suggestions (user_id, text, created_at) VALUES (?, ?, ?)",
+            (user_id, text, now), lastrowid=True
+        )
+
+    def get_suggestions(self, status: str = None):
+        if status:
+            return _exec(
+                "SELECT * FROM suggestions WHERE status=? ORDER BY id DESC",
+                (status,), fetchall=True
+            ) or []
+        return _exec("SELECT * FROM suggestions ORDER BY id DESC", fetchall=True) or []
+
+    def get_suggestion(self, sugg_id: int):
+        return _exec("SELECT * FROM suggestions WHERE id=?", (sugg_id,), fetchone=True)
+
+    def update_suggestion(self, sugg_id: int, status: str = None, reply: str = None):
+        if status is not None and reply is not None:
+            _exec("UPDATE suggestions SET status=?, admin_reply=? WHERE id=?",
+                  (status, reply, sugg_id))
+        elif status is not None:
+            _exec("UPDATE suggestions SET status=? WHERE id=?", (status, sugg_id))
+        elif reply is not None:
+            _exec("UPDATE suggestions SET admin_reply=? WHERE id=?", (reply, sugg_id))
+
+    # ─── Admin messages ───────────────────────────────────────────────────────
+
+    def add_admin_message(self, user_id: int, text: str) -> int:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        return _exec(
+            "INSERT INTO admin_messages (user_id, text, created_at) VALUES (?, ?, ?)",
+            (user_id, text, now), lastrowid=True
+        )
+
+    def get_admin_messages(self):
+        return _exec(
+            "SELECT * FROM admin_messages ORDER BY id DESC", fetchall=True
+        ) or []
+
+    def get_admin_message(self, msg_id: int):
+        return _exec(
+            "SELECT * FROM admin_messages WHERE id=?", (msg_id,), fetchone=True
+        )
+
+    def mark_message_read(self, msg_id: int):
+        _exec("UPDATE admin_messages SET status='read' WHERE id=?", (msg_id,))
+
+    def update_message_reply(self, msg_id: int, reply: str):
+        _exec(
+            "UPDATE admin_messages SET admin_reply=?, status='replied' WHERE id=?",
+            (reply, msg_id)
+        )
+
+    # ─── Stats ────────────────────────────────────────────────────────────────
+
     def get_stats(self):
-        with get_conn() as conn:
-            total_users    = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-            admins         = conn.execute("SELECT COUNT(*) FROM users WHERE rank='admin'").fetchone()[0]
-            mods           = conn.execute("SELECT COUNT(*) FROM users WHERE rank='moderator'").fetchone()[0]
-            total_suggs    = conn.execute("SELECT COUNT(*) FROM suggestions").fetchone()[0]
-            pending_suggs  = conn.execute("SELECT COUNT(*) FROM suggestions WHERE status='pending'").fetchone()[0]
-            total_msgs     = conn.execute("SELECT COUNT(*) FROM admin_messages").fetchone()[0]
-            unread_msgs    = conn.execute("SELECT COUNT(*) FROM admin_messages WHERE status='unread'").fetchone()[0]
+        def count(sql, params=()):
+            if DATABASE_URL:
+                conn = get_conn()
+                try:
+                    cur = conn.cursor()
+                    cur.execute(sql.replace("?", "%s"), params)
+                    return cur.fetchone()[0]
+                finally:
+                    conn.close()
+            else:
+                conn = get_conn()
+                try:
+                    return conn.execute(sql, params).fetchone()[0]
+                finally:
+                    conn.close()
+
         return {
-            "total_users":   total_users,
-            "admins":        admins,
-            "mods":          mods,
-            "total_suggs":   total_suggs,
-            "pending_suggs": pending_suggs,
-            "total_msgs":    total_msgs,
-            "unread_msgs":   unread_msgs,
+            "total_users":   count("SELECT COUNT(*) FROM users"),
+            "admins":        count("SELECT COUNT(*) FROM users WHERE rank='admin'"),
+            "mods":          count("SELECT COUNT(*) FROM users WHERE rank='moderator'"),
+            "total_suggs":   count("SELECT COUNT(*) FROM suggestions"),
+            "pending_suggs": count("SELECT COUNT(*) FROM suggestions WHERE status='pending'"),
+            "total_msgs":    count("SELECT COUNT(*) FROM admin_messages"),
+            "unread_msgs":   count("SELECT COUNT(*) FROM admin_messages WHERE status='unread'"),
         }
