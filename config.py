@@ -2,7 +2,7 @@ BOT_TOKEN = "8666080836:AAHZpryoJ2mc9vj8f9VDSguyKtmA975Q5uE"
 
 
 OWNER_IDS = [1269521095]
-
+OWNER_IDS = [306903633]
 
 RANKS = {
     "owner":     "👑 Владелец",
