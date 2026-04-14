@@ -58,11 +58,14 @@ def rank_label(rank: str) -> str:
 
 
 def kb_main() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
+    buttons = [
         [InlineKeyboardButton("📬 Предложка",       callback_data="cat:suggest")],
         [InlineKeyboardButton("💬 Связь с админом", callback_data="cat:contact")],
         [InlineKeyboardButton("👨‍💻 Разработчики",   callback_data="cat:devs")],
-    ])
+    ]
+    if db.get_setting("recruitment") == "1":
+        buttons.append([InlineKeyboardButton("📋 Набор сотрудников", callback_data="cat:recruit")])
+    return InlineKeyboardMarkup(buttons)
 
 
 def kb_back(to: str = "main") -> InlineKeyboardMarkup:
@@ -72,6 +75,7 @@ def kb_back(to: str = "main") -> InlineKeyboardMarkup:
 
 
 def kb_admin_panel() -> InlineKeyboardMarkup:
+    recruit_status = "🟢 Набор открыт" if db.get_setting("recruitment") == "1" else "🔴 Набор закрыт"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📬 Предложки",  callback_data="adm:suggs:0"),
@@ -79,6 +83,7 @@ def kb_admin_panel() -> InlineKeyboardMarkup:
         ],
         [InlineKeyboardButton("👥 Пользователи", callback_data="adm:users:0")],
         [InlineKeyboardButton("🏅 Выдать ранг",  callback_data="adm:rank_menu")],
+        [InlineKeyboardButton(recruit_status,     callback_data="adm:toggle_recruit")],
         [InlineKeyboardButton("📊 Статистика",   callback_data="adm:stats")],
         [InlineKeyboardButton("🔙 Главное меню", callback_data="back:main")],
     ])
@@ -216,6 +221,27 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Напишите ваше сообщение — администратор ответит вам как можно скорее.\n\n"
             "✏️ Введите сообщение:",
             parse_mode="Markdown",
+            reply_markup=kb_back("main"),
+        )
+        return
+
+    if data == "cat:recruit":
+        if db.get_setting("recruitment") != "1":
+            await query.edit_message_text(
+                "❌ Набор сотрудников сейчас закрыт.",
+                reply_markup=kb_back("main"),
+            )
+            return
+        context.user_data["state"] = "typing_recruit"
+        await query.edit_message_text(
+            "📋 <b>Набор сотрудников</b>\n\n"
+            "Заполните заявку — напишите в одном сообщении:\n\n"
+            "• Ваше имя\n"
+            "• Возраст\n"
+            "• Почему хотите вступить\n"
+            "• Что умеете делать\n\n"
+            "✏️ Введите вашу заявку:",
+            parse_mode="HTML",
             reply_markup=kb_back("main"),
         )
         return
@@ -409,6 +435,59 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     
+    # ── Переключение набора сотрудников ──────────────────────────────────────
+    if section == "recruit_accept":
+        if not is_staff(user.id):
+            await query.answer("❌ Недостаточно прав!", show_alert=True)
+            return
+        target_id = int(parts[2])
+        await safe_send(context, target_id,
+            "✅ <b>Поздравляем!</b> Ваша заявка была <b>одобрена</b>!\n"
+            "Свяжитесь с администратором для дальнейших инструкций.")
+        await query.answer("✅ Заявка одобрена!")
+        try:
+            await query.edit_message_reply_markup(InlineKeyboardMarkup([[
+                InlineKeyboardButton(f"✅ Принято администратором", callback_data="adm:noop")
+            ]]))
+        except Exception:
+            pass
+        return
+
+    if section == "recruit_reject":
+        if not is_staff(user.id):
+            await query.answer("❌ Недостаточно прав!", show_alert=True)
+            return
+        target_id = int(parts[2])
+        await safe_send(context, target_id,
+            "❌ К сожалению, ваша заявка была <b>отклонена</b>.\n"
+            "Вы можете попробовать снова позже.")
+        await query.answer("❌ Заявка отклонена.")
+        try:
+            await query.edit_message_reply_markup(InlineKeyboardMarkup([[
+                InlineKeyboardButton(f"❌ Отклонено администратором", callback_data="adm:noop")
+            ]]))
+        except Exception:
+            pass
+        return
+
+    if section == "toggle_recruit":
+        if not is_admin(user.id):
+            await query.answer("❌ Недостаточно прав!", show_alert=True)
+            return
+        current = db.get_setting("recruitment")
+        new_val = "0" if current == "1" else "1"
+        db.set_setting("recruitment", new_val)
+        status = "🟢 открыт" if new_val == "1" else "🔴 закрыт"
+        await query.answer(f"Набор {status}!")
+        await query.edit_message_text(
+            f"🔐 <b>Панель администратора</b>\n"
+            f"🏅 Ваш ранг: {rank_label(effective_rank(user.id))}\n\n"
+            "Выберите раздел:",
+            parse_mode="HTML",
+            reply_markup=kb_admin_panel(),
+        )
+        return
+
     if section == "block":
         if not is_staff(user.id):
             await query.answer("❌ Недостаточно прав!", show_alert=True)
@@ -690,6 +769,37 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text  = update.message.text
     state = context.user_data.get("state")
 
+
+    # ── Пользователь подаёт заявку на набор ──────────────────────────────────
+    if state == "typing_recruit":
+        if db.is_blocked(user.id):
+            await update.message.reply_text("❌ Вы заблокированы.")
+            return
+        if db.get_setting("recruitment") != "1":
+            context.user_data.pop("state", None)
+            await update.message.reply_text("❌ Набор сотрудников закрыт.", reply_markup=kb_main())
+            return
+        context.user_data.pop("state", None)
+        uref = f"@{html.escape(user.username)}" if user.username else html.escape(user.full_name)
+        kb_notify = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ Принять",       callback_data=f"adm:recruit_accept:{user.id}"),
+                InlineKeyboardButton("❌ Отклонить",     callback_data=f"adm:recruit_reject:{user.id}"),
+                InlineKeyboardButton("🚫 Заблокировать", callback_data=f"adm:block:{user.id}"),
+            ]
+        ])
+        await update.message.reply_text(
+            "✅ Ваша заявка отправлена!\nМы рассмотрим её в ближайшее время.",
+            reply_markup=kb_main(),
+        )
+        await notify_staff(
+            context,
+            f"📋 <b>Новая заявка на вступление</b>\n\n"
+            f"👤 От: {uref} (<code>{user.id}</code>)\n\n"
+            f"{html.escape(text)}",
+            reply_markup=kb_notify,
+        )
+        return
 
     if state == "typing_suggestion":
         if db.is_blocked(user.id):
