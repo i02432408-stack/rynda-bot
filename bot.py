@@ -227,7 +227,11 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "cat:recruit":
-        if db.get_setting("recruitment") != "1":
+        try:
+            is_closed = db.get_setting("recruitment") == "0"
+        except Exception:
+            is_closed = False
+        if is_closed:
             await query.edit_message_text(
                 "❌ Набор сотрудников сейчас закрыт.",
                 reply_markup=kb_back("main"),
@@ -773,7 +777,11 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if db.is_blocked(user.id):
             await update.message.reply_text("❌ Вы заблокированы.")
             return
-        if db.get_setting("recruitment") != "1":
+        try:
+            is_closed = db.get_setting("recruitment") == "0"
+        except Exception:
+            is_closed = False
+        if is_closed:
             context.user_data.pop("state", None)
             await update.message.reply_text("❌ Набор сотрудников закрыт.", reply_markup=kb_main())
             return
