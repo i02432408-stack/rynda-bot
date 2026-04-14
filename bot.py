@@ -151,6 +151,15 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 
+async def cmd_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    u = update.effective_user
+    if not is_staff(u.id):
+        return
+    await update.message.reply_text("📨 Отправляю тестовое уведомление...")
+    await notify_staff(context, f"✅ <b>Тест уведомлений работает!</b>\nОтправил: @{u.username or u.first_name}")
+    await update.message.reply_text("✅ Готово! Проверьте получили ли вы уведомление.")
+
+
 async def cmd_admpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     u = update.effective_user
     db.add_user(u.id, u.username or "", u.full_name)
@@ -994,6 +1003,7 @@ def main():
 
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("admpanel", cmd_admpanel))
+    app.add_handler(CommandHandler("test",     cmd_test))
     app.add_handler(CallbackQueryHandler(on_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
