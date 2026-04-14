@@ -167,7 +167,7 @@ async def cmd_admpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if u.id in OWNER_IDS and db.get_user_rank(u.id) != "owner":
         db.set_user_rank(u.id, "owner")
 
-    if not is_admin(u.id):
+    if not is_staff(u.id):
         await update.message.reply_text("❌ У вас нет доступа к панели администратора.")
         return
 
