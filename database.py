@@ -81,6 +81,19 @@ def _init_sqlite():
             conn.execute("ALTER TABLE users ADD COLUMN blocked INTEGER DEFAULT 0")
         except Exception:
             pass
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES ('recruitment', '1')"
+            )
+            conn.commit()
+        except Exception:
+            pass
 
 
 def _init_pg():
@@ -116,6 +129,16 @@ def _init_pg():
                 admin_reply TEXT
             )
         """)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        cur.execute(
+            "INSERT INTO settings (key, value) VALUES ('recruitment', '1') "
+            "ON CONFLICT (key) DO NOTHING"
+        )
         conn.commit()
 
 
@@ -281,6 +304,25 @@ class Database:
             "UPDATE admin_messages SET admin_reply=?, status='replied' WHERE id=?",
             (reply, msg_id)
         )
+
+    # ─── Settings ─────────────────────────────────────────────────────────────
+
+    def get_setting(self, key: str, default="1") -> str:
+        row = _exec("SELECT value FROM settings WHERE key=?", (key,), fetchone=True)
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str):
+        if DATABASE_URL:
+            _exec(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT (key) DO UPDATE SET value=?",
+                (key, value, value)
+            )
+        else:
+            _exec(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+                (key, value)
+            )
 
     # ─── Stats ────────────────────────────────────────────────────────────────
 
