@@ -64,10 +64,11 @@ def kb_main() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("👨‍💻 Разработчики",   callback_data="cat:devs")],
     ]
     try:
-        if db.get_setting("recruitment") == "1":
-            buttons.append([InlineKeyboardButton("📋 Набор сотрудников", callback_data="cat:recruit")])
+        show = db.get_setting("recruitment", default="1") != "0"
     except Exception:
-        pass
+        show = True
+    if show:
+        buttons.append([InlineKeyboardButton("📋 Набор сотрудников", callback_data="cat:recruit")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -79,9 +80,9 @@ def kb_back(to: str = "main") -> InlineKeyboardMarkup:
 
 def kb_admin_panel() -> InlineKeyboardMarkup:
     try:
-        recruit_status = "🟢 Набор открыт" if db.get_setting("recruitment") == "1" else "🔴 Набор закрыт"
+        recruit_status = "🟢 Набор открыт" if db.get_setting("recruitment", "1") != "0" else "🔴 Набор закрыт"
     except Exception:
-        recruit_status = "🔴 Набор закрыт"
+        recruit_status = "🟢 Набор открыт"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📬 Предложки",  callback_data="adm:suggs:0"),
