@@ -13,7 +13,7 @@ from telegram.ext import (
 from config import BOT_TOKEN, OWNER_IDS, RANKS, DEVELOPERS_TEXT
 from database import Database, init_db
 
-# ── Веб-сервер для UptimeRobot ────────────────────────────────────────────────
+
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -25,7 +25,7 @@ def _run_web():
     flask_app.run(host="0.0.0.0", port=port)
 
 Thread(target=_run_web, daemon=True).start()
-# ─────────────────────────────────────────────────────────────────────────────
+
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s — %(message)s",
@@ -63,8 +63,11 @@ def kb_main() -> InlineKeyboardMarkup:
         [InlineKeyboardButton("💬 Связь с админом", callback_data="cat:contact")],
         [InlineKeyboardButton("👨‍💻 Разработчики",   callback_data="cat:devs")],
     ]
-    if db.get_setting("recruitment") == "1":
-        buttons.append([InlineKeyboardButton("📋 Набор сотрудников", callback_data="cat:recruit")])
+    try:
+        if db.get_setting("recruitment") == "1":
+            buttons.append([InlineKeyboardButton("📋 Набор сотрудников", callback_data="cat:recruit")])
+    except Exception:
+        pass
     return InlineKeyboardMarkup(buttons)
 
 
@@ -75,7 +78,10 @@ def kb_back(to: str = "main") -> InlineKeyboardMarkup:
 
 
 def kb_admin_panel() -> InlineKeyboardMarkup:
-    recruit_status = "🟢 Набор открыт" if db.get_setting("recruitment") == "1" else "🔴 Набор закрыт"
+    try:
+        recruit_status = "🟢 Набор открыт" if db.get_setting("recruitment") == "1" else "🔴 Набор закрыт"
+    except Exception:
+        recruit_status = "🔴 Набор закрыт"
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("📬 Предложки",  callback_data="adm:suggs:0"),
@@ -435,7 +441,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     
-    # ── Переключение набора сотрудников ──────────────────────────────────────
+
     if section == "recruit_accept":
         if not is_staff(user.id):
             await query.answer("❌ Недостаточно прав!", show_alert=True)
@@ -767,10 +773,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.add_user(user.id, user.username or "", user.full_name)
     text  = update.message.text
-    state = context.user_data.get("state")
 
-
-    # ── Пользователь подаёт заявку на набор ──────────────────────────────────
     if state == "typing_recruit":
         if db.is_blocked(user.id):
             await update.message.reply_text("❌ Вы заблокированы.")
