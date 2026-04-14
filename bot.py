@@ -72,22 +72,25 @@ def kb_back(to: str = "main") -> InlineKeyboardMarkup:
     ]])
 
 
-def kb_admin_panel() -> InlineKeyboardMarkup:
-    try:
-        recruit_status = "🟢 Набор открыт" if db.get_setting("recruitment", "1") != "0" else "🔴 Набор закрыт"
-    except Exception:
-        recruit_status = "🟢 Набор открыт"
-    return InlineKeyboardMarkup([
+def kb_admin_panel(user_id: int = 0) -> InlineKeyboardMarkup:
+    buttons = [
         [
-            InlineKeyboardButton("📬 Предложки",  callback_data="adm:suggs:0"),
-            InlineKeyboardButton("💬 Сообщения",  callback_data="adm:msgs:0"),
+            InlineKeyboardButton("📬 Предложки", callback_data="adm:suggs:0"),
+            InlineKeyboardButton("💬 Сообщения", callback_data="adm:msgs:0"),
         ],
-        [InlineKeyboardButton("👥 Пользователи", callback_data="adm:users:0")],
-        [InlineKeyboardButton("🏅 Выдать ранг",  callback_data="adm:rank_menu")],
-        [InlineKeyboardButton(recruit_status,     callback_data="adm:toggle_recruit")],
-        [InlineKeyboardButton("📊 Статистика",   callback_data="adm:stats")],
-        [InlineKeyboardButton("🔙 Главное меню", callback_data="back:main")],
-    ])
+    ]
+    # Только админы и владельцы видят управление пользователями и набором
+    if is_admin(user_id):
+        buttons.append([InlineKeyboardButton("👥 Пользователи", callback_data="adm:users:0")])
+        buttons.append([InlineKeyboardButton("🏅 Выдать ранг",  callback_data="adm:rank_menu")])
+        try:
+            recruit_status = "🟢 Набор открыт" if db.get_setting("recruitment", "1") != "0" else "🔴 Набор закрыт"
+        except Exception:
+            recruit_status = "🟢 Набор открыт"
+        buttons.append([InlineKeyboardButton(recruit_status, callback_data="adm:toggle_recruit")])
+    buttons.append([InlineKeyboardButton("📊 Статистика",   callback_data="adm:stats")])
+    buttons.append([InlineKeyboardButton("🔙 Главное меню", callback_data="back:main")])
+    return InlineKeyboardMarkup(buttons)
 
 
 
@@ -176,7 +179,7 @@ async def cmd_admpanel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🏅 Ваш ранг: {rank_label(effective_rank(u.id))}\n\n"
         "Выберите раздел:",
         parse_mode="Markdown",
-        reply_markup=kb_admin_panel(),
+        reply_markup=kb_admin_panel(u.id),
     )
 
 
@@ -200,7 +203,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "back:adm":
-        if not is_admin(user.id):
+        if not is_staff(user.id):
             await query.edit_message_text("❌ Доступ запрещён.")
             return
         await query.edit_message_text(
@@ -208,7 +211,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏅 Ваш ранг: {rank_label(effective_rank(user.id))}\n\n"
             "Выберите раздел:",
             parse_mode="Markdown",
-            reply_markup=kb_admin_panel(),
+            reply_markup=kb_admin_panel(user.id),
         )
         return
 
@@ -498,7 +501,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏅 Ваш ранг: {rank_label(effective_rank(user.id))}\n\n"
             "Выберите раздел:",
             parse_mode="HTML",
-            reply_markup=kb_admin_panel(),
+            reply_markup=kb_admin_panel(user.id),
         )
         return
 
