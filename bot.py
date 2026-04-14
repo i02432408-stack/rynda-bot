@@ -58,18 +58,12 @@ def rank_label(rank: str) -> str:
 
 
 def kb_main() -> InlineKeyboardMarkup:
-    buttons = [
-        [InlineKeyboardButton("📬 Предложка",       callback_data="cat:suggest")],
-        [InlineKeyboardButton("💬 Связь с админом", callback_data="cat:contact")],
-        [InlineKeyboardButton("👨‍💻 Разработчики",   callback_data="cat:devs")],
-    ]
-    try:
-        show = db.get_setting("recruitment", default="1") != "0"
-    except Exception:
-        show = True
-    if show:
-        buttons.append([InlineKeyboardButton("📋 Набор сотрудников", callback_data="cat:recruit")])
-    return InlineKeyboardMarkup(buttons)
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📬 Предложка",          callback_data="cat:suggest")],
+        [InlineKeyboardButton("💬 Связь с админом",    callback_data="cat:contact")],
+        [InlineKeyboardButton("👨‍💻 Разработчики",      callback_data="cat:devs")],
+        [InlineKeyboardButton("📋 Набор сотрудников",  callback_data="cat:recruit")],
+    ])
 
 
 def kb_back(to: str = "main") -> InlineKeyboardMarkup:
