@@ -82,6 +82,11 @@ def _init_sqlite():
         except Exception:
             pass
         try:
+            conn.execute("ALTER TABLE users ADD COLUMN state TEXT DEFAULT NULL")
+            conn.commit()
+        except Exception:
+            pass
+        try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS settings (
                     key   TEXT PRIMARY KEY,
@@ -139,6 +144,10 @@ def _init_pg():
             "INSERT INTO settings (key, value) VALUES ('recruitment', '1') "
             "ON CONFLICT (key) DO NOTHING"
         )
+        # Миграция колонки state
+        cur.execute("""
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS state TEXT DEFAULT NULL
+        """)
         conn.commit()
 
 
@@ -241,6 +250,13 @@ class Database:
     def is_blocked(self, user_id: int) -> bool:
         row = _exec("SELECT blocked FROM users WHERE user_id=?", (user_id,), fetchone=True)
         return bool(row["blocked"]) if row else False
+
+    def get_user_state(self, user_id: int):
+        row = _exec("SELECT state FROM users WHERE user_id=?", (user_id,), fetchone=True)
+        return row["state"] if row and row.get("state") else None
+
+    def set_user_state(self, user_id: int, state):
+        _exec("UPDATE users SET state=? WHERE user_id=?", (state, user_id))
 
     def block_user(self, user_id: int):
         _exec("UPDATE users SET blocked=1 WHERE user_id=?", (user_id,))

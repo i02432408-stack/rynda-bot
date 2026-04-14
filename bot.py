@@ -214,7 +214,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
     if data == "cat:suggest":
-        context.user_data["state"] = "typing_suggestion"
+        db.set_user_state(user.id, "typing_suggestion")
         await query.edit_message_text(
             "📬 *Предложка*\n\n"
             "Напишите вашу идею или предложение — мы обязательно рассмотрим его!\n\n"
@@ -225,7 +225,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "cat:contact":
-        context.user_data["state"] = "typing_contact"
+        db.set_user_state(user.id, "typing_contact")
         await query.edit_message_text(
             "💬 *Связь с администратором*\n\n"
             "Напишите ваше сообщение — администратор ответит вам как можно скорее.\n\n"
@@ -246,7 +246,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=kb_back("main"),
             )
             return
-        context.user_data["state"] = "typing_recruit"
+        db.set_user_state(user.id, "typing_recruit")
         await query.edit_message_text(
             "📋 <b>Набор сотрудников</b>\n\n"
             "Заполните заявку — напишите в одном сообщении:\n\n"
@@ -360,7 +360,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_staff(user.id):
             return
         sugg_id = int(parts[2])
-        context.user_data["state"] = f"adm_reply_sugg:{sugg_id}"
+        db.set_user_state(user.id, f"adm_reply_sugg:{sugg_id}")
         await query.edit_message_text(
             "✏️ Введите ответ на предложение:",
             reply_markup=InlineKeyboardMarkup([[
@@ -394,7 +394,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not is_staff(user.id):
             return
         msg_id = int(parts[2])
-        context.user_data["state"] = f"adm_reply_msg:{msg_id}"
+        db.set_user_state(user.id, f"adm_reply_msg:{msg_id}")
         await query.edit_message_text(
             "✏️ Введите ответ пользователю:",
             reply_markup=InlineKeyboardMarkup([[
@@ -567,7 +567,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text("❌ Доступ запрещён.")
             return
         chosen_rank = parts[2]
-        context.user_data["state"] = f"adm_rank_input:{chosen_rank}"
+        db.set_user_state(user.id, f"adm_rank_input:{chosen_rank}")
         rank_names = {"admin": "🛡️ Администратор", "moderator": "⚔️ Модератор", "user": "👤 Пользователь"}
         await query.edit_message_text(
             f"🏅 Выдача ранга: <b>{rank_names.get(chosen_rank, chosen_rank)}</b>\n\n"
@@ -781,6 +781,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     db.add_user(user.id, user.username or "", user.full_name)
     text  = update.message.text
+    state = db.get_user_state(user.id)
 
     if state == "typing_recruit":
         if db.is_blocked(user.id):
@@ -791,10 +792,10 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             is_closed = False
         if is_closed:
-            context.user_data.pop("state", None)
+            db.set_user_state(user.id, None)
             await update.message.reply_text("❌ Набор сотрудников закрыт.", reply_markup=kb_main())
             return
-        context.user_data.pop("state", None)
+        db.set_user_state(user.id, None)
         uref = f"@{html.escape(user.username)}" if user.username else html.escape(user.full_name)
         kb_notify = InlineKeyboardMarkup([
             [
@@ -820,7 +821,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if db.is_blocked(user.id):
             await update.message.reply_text("❌ Вы заблокированы и не можете отправлять предложения.")
             return
-        context.user_data.pop("state", None)
+        db.set_user_state(user.id, None)
         sugg_id = db.add_suggestion(user.id, text)
         await update.message.reply_text(
             f"✅ Предложение <b>#{sugg_id}</b> отправлено!\n"
@@ -850,7 +851,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if db.is_blocked(user.id):
             await update.message.reply_text("❌ Вы заблокированы и не можете отправлять сообщения.")
             return
-        context.user_data.pop("state", None)
+        db.set_user_state(user.id, None)
         msg_id = db.add_admin_message(user.id, text)
         await update.message.reply_text(
             f"✅ Сообщение <b>#{msg_id}</b> отправлено!\n"
@@ -878,10 +879,10 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state and state.startswith("adm_reply_sugg:"):
         if not is_staff(user.id):
-            context.user_data.pop("state", None)
+            db.set_user_state(user.id, None)
             return
         sugg_id = int(state.split(":")[1])
-        context.user_data.pop("state", None)
+        db.set_user_state(user.id, None)
         sugg = db.get_suggestion(sugg_id)
         if sugg:
             db.update_suggestion(sugg_id, reply=text)
@@ -901,10 +902,10 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state and state.startswith("adm_reply_msg:"):
         if not is_staff(user.id):
-            context.user_data.pop("state", None)
+            db.set_user_state(user.id, None)
             return
         msg_id = int(state.split(":")[1])
-        context.user_data.pop("state", None)
+        db.set_user_state(user.id, None)
         msg = db.get_admin_message(msg_id)
         if msg:
             db.update_message_reply(msg_id, text)
@@ -924,10 +925,10 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if state and state.startswith("adm_rank_input:"):
         if not is_admin(user.id):
-            context.user_data.pop("state", None)
+            db.set_user_state(user.id, None)
             return
         new_rank = state.split(":")[1]
-        context.user_data.pop("state", None)
+        db.set_user_state(user.id, None)
 
 
         target = None
