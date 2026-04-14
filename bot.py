@@ -808,11 +808,14 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Ваша заявка отправлена!\nМы рассмотрим её в ближайшее время.",
             reply_markup=kb_main(),
         )
+        username_line = f"🔗 Юзернейм: @{html.escape(user.username)}\n" if user.username else "🔗 Юзернейм: отсутствует\n"
         await notify_staff(
             context,
             f"📋 <b>Новая заявка на вступление</b>\n\n"
-            f"👤 От: {uref} (<code>{user.id}</code>)\n\n"
-            f"{html.escape(text)}",
+            f"👤 Имя: <a href='tg://user?id={user.id}'>{html.escape(user.full_name)}</a>\n"
+            f"{username_line}"
+            f"🆔 ID: <code>{user.id}</code>\n\n"
+            f"📝 Заявка:\n{html.escape(text)}",
             reply_markup=kb_notify,
         )
         return

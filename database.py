@@ -2,7 +2,7 @@ import os
 import sqlite3
 from datetime import datetime
 
-# Если задана DATABASE_URL — используем PostgreSQL, иначе SQLite
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 
 if DATABASE_URL:
@@ -151,7 +151,7 @@ def _init_pg():
         conn.commit()
 
 
-# ─── Универсальный исполнитель запросов ───────────────────────────────────────
+
 
 def _exec(sql: str, params=(), fetchone=False, fetchall=False, lastrowid=False):
     """Выполняет SQL совместимо с SQLite и PostgreSQL."""
@@ -199,7 +199,7 @@ def _exec(sql: str, params=(), fetchone=False, fetchall=False, lastrowid=False):
             conn.close()
 
 
-# ─── Database class ───────────────────────────────────────────────────────────
+
 
 class Database:
 
@@ -264,7 +264,7 @@ class Database:
     def unblock_user(self, user_id: int):
         _exec("UPDATE users SET blocked=0 WHERE user_id=?", (user_id,))
 
-    # ─── Suggestions ──────────────────────────────────────────────────────────
+   
 
     def add_suggestion(self, user_id: int, text: str) -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -293,7 +293,7 @@ class Database:
         elif reply is not None:
             _exec("UPDATE suggestions SET admin_reply=? WHERE id=?", (reply, sugg_id))
 
-    # ─── Admin messages ───────────────────────────────────────────────────────
+
 
     def add_admin_message(self, user_id: int, text: str) -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -321,7 +321,7 @@ class Database:
             (reply, msg_id)
         )
 
-    # ─── Settings ─────────────────────────────────────────────────────────────
+
 
     def get_setting(self, key: str, default="1") -> str:
         row = _exec("SELECT value FROM settings WHERE key=?", (key,), fetchone=True)
@@ -340,7 +340,7 @@ class Database:
                 (key, value)
             )
 
-    # ─── Stats ────────────────────────────────────────────────────────────────
+    
 
     def get_stats(self):
         def count(sql, params=()):
